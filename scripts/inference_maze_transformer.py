@@ -268,9 +268,10 @@ class HighLevelController:
     def start_single_nav_task(self, data_dir, goal_dir, ckpt_file):
         goal_image_files = glob(os.path.join(goal_dir, '*_*.png'))
         goal_image_files = rearrange(goal_image_files)
+        np.random.shuffle(goal_image_files)
         goal_images = [imageio.v2.imread(f) for f in goal_image_files]
         # load dataset and initialize the agent
-        agent = Policy(load_SA(data_dir), ckpt_file, )
+        agent = Policy(load_SA(data_dir), ckpt_file)
         agent.to(agent.device).reset()
         # iter all goal images and act till completion
         print(f'Agent is reset! Begin to navigate.')
@@ -408,7 +409,7 @@ class HighLevelController:
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--data_dir', type=str, default='offline-dataset/maze-dataset/0')
-    parser.add_argument('--ckpt_file', type=str, default='logs/maze/policy_10400.pth')
+    parser.add_argument('--ckpt_file', '-c', type=str, default='logs/maze_5+1traj/policy_22000.pth')
     args = parser.parse_args()
     args.goal_dir = os.path.join(args.data_dir, 'goal_frames')
     hlc = HighLevelController()

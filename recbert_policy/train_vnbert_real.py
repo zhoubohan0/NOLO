@@ -14,7 +14,7 @@ from torch.cuda.amp import GradScaler, autocast
 from torch.nn import functional as F
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data import DataLoader, Dataset, DistributedSampler
-from torchvision.transforms import ColorJitter, Compose, RandomResizedCrop, ToPILImage, Resize
+from torchvision.transforms import ColorJitter, Compose, RandomResizedCrop, ToPILImage, RandomHorizontalFlip
 
 from recbert_policy.vnbert import VNBERTPolicy
 from utils.basic_utils import (
@@ -43,8 +43,9 @@ class NewDataset(Dataset):
         self.horizon = horizon
         self.augment = Compose([
             ToPILImage(),
-            RandomResizedCrop(224, scale=(0.9, 1.0), ratio=(0.8, 1.2)),
-            ColorJitter(brightness=0.1, contrast=0.1, saturation=0.1, hue=0.1),
+            RandomResizedCrop(224, scale=(0.8, 1.0), ratio=(0.8, 1.2)),
+            RandomHorizontalFlip(p=0.1),
+            ColorJitter(brightness=0.4, contrast=0.4, saturation=0.4, hue=0.1),
         ])
         self.switch_dataset()
 

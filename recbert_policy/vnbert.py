@@ -414,7 +414,7 @@ class VNBertModule(BertPreTrainedModel):
 
 def get_vlnbert_modules(input_dim):
     vis_config = BertConfig.from_pretrained('bert-base-uncased')#, local_files_only=True
-    # TODO: modify theoriginal bert config
+    # TODO: modify the original bert config
     vis_config.input_dim = input_dim
     vis_config.img_feature_type = ""
     vis_config.vl_layers = 4

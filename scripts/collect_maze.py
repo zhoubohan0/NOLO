@@ -66,7 +66,7 @@ class WirelessHighLevelController:
             # depth_image = np.expand_dims(np.asanyarray(depth_frame.get_data()), axis=2)
             depth_image = np.asanyarray(depth_frame.get_data())
             color_image = np.asanyarray(color_frame.get_data())
-
+            
             # # Get camera extrinsics
             # pose_matrix = rs.video_stream_profile(color_frame.profile).get_extrinsics_to(rs.video_stream_profile(depth_frame.profile))
             # rotation = np.asanyarray(pose_matrix.rotation)
@@ -80,10 +80,12 @@ class WirelessHighLevelController:
 
     def __init__(self, forward_distance=0.3, turn_angle=np.pi/6, record_file=''):
         self.forward_distance, self.turn_angle = forward_distance, turn_angle
-        self.action_names = ['forward', 'turn_left', 'turn_right', 'backward']
+        self.action_names = ['forward', 'turn_left', 'turn_right', 'backward', 'stop']
         self.rgb_writer = iio.get_writer(record_file, fps=10) if record_file else None
         self.act_file = os.path.join(os.path.dirname(record_file), 'data.json') if record_file else ''
         self.act_record = []
+        self.dep_dir = os.path.join(os.path.dirname(record_file), 'depth') if record_file else ''
+        os.makedirs(self.dep_dir, exist_ok=True)
         # Initialize lock for thread-safe operations
         self.lock = threading.Lock()
 
@@ -93,7 +95,7 @@ class WirelessHighLevelController:
         self.config.enable_stream(rs.stream.depth, 640, 480, rs.format.z16, 30)
         self.config.enable_stream(rs.stream.color, 640, 480, rs.format.bgr8, 30)
         self.pipeline.start(self.config) # Start streaming
-        self.rgb, self.dpt = np.zeros([640, 480]), np.zeros([640, 480])
+        self.rgb, self.dpt = np.zeros([640, 480]), np.zeros([640, 480], dtype=np.uint16)
 
         self.robot_state = unitree_go_msg_dds__SportModeState_()
         
@@ -356,9 +358,11 @@ class WirelessHighLevelController:
             print(f"step: {len(self.act_record)} | action:{action} | distance:{np.linalg.norm(np.array(self.xyz)-np.array(next_obs['position']))}")
             self.xyz = next_obs['position']
             if self.rgb_writer is not None:
+                i = len(self.act_record)
                 self.rgb_writer.append_data(next_obs['rgb'])
+                cv2.imwrite(os.path.join(self.dep_dir, f'{i}.png'), (self.dpt * 1000).astype(np.uint16))
                 self.act_record.append(self.action_names.index(action))
-                if len(self.act_record) % 10 == 0:
+                if i % 10 == 0:
                     # np.save(self.act_file, np.array(self.act_record))
                     with open(self.act_file, 'w') as f:
                         json.dump(dict(true_actions=self.act_record), f, indent=4)

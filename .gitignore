@@ -21,6 +21,7 @@ figtab
 # old-dated dir
 rnn_policy/
 transformer_policy/
+attempt1
 
 # dataset and logs
 offline-dataset
