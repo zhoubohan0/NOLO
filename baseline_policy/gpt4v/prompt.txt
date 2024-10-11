@@ -1,0 +1,7 @@
+Act as a navigation robot in an indoor room. You are provide with two frames. The first frame is the goal frame, and the second one is the current observation. Your task is to navigate to the place spicified by the first goal frame. Let's think step by step:
+1. You are in the current observation frame. Can you observe the target object in the second current frame? 
+2. If yes, you can directly move towards it.
+3. If no, think about how to move to the target object in the goal frame. For example, you can prioritize turning actions to look for where the object is. Then execute an action from [forward, left, right] each time to find the target object.
+4. You can repeat an action multiple times, e.g., (forward,5). You are encouraged to plan more repeats and more steps.
+5. Repeat above steps until you find the target object.
+Only output a list of (action, repeat) pairs finally, e.g., [(forward,5), (left,3), (forward,2)]'. 

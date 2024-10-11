@@ -1,0 +1,48 @@
+# pretrained models
+scripts/Detic
+gmflow/pretrained
+rnn_policy/weights
+transformer_policy/*.pth.tar
+recbert_policy/*.pth.tar
+LanguageBind/
+Prevalent/
+cache_dir/
+final_result/
+scripts/gmflow/gmflow-pretrained
+
+
+# unnecessary files
+**/__pycache__/
+
+# plot
+figtab
+
+# old-dated dir
+rnn_policy/
+transformer_policy/
+
+# dataset and logs
+offline-dataset
+logs*/
+visualization/
+
+# scripts
+scripts/habitat_navigate_backup.py
+scripts/reorganize_trajectory/reorganize_trajs.py
+scripts/reorganize_trajectory/simple_visualize_trajs.py
+scripts/inference_robothor/
+scripts/check_action_prediction.py
+gmflow/visualize_flow.py
+uselessrobothor/
+vector_quantize_pytorch/
+
+process_result.py
+check_result.py
+convey.sh
+download_checkpoint.sh
+
+# others
+step.txt
+baseline_policy/gpt4v/gpt4v_api-key.txt
+docs/
+
