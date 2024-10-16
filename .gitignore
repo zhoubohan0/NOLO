@@ -9,6 +9,7 @@ Prevalent/
 cache_dir/
 final_result/
 scripts/gmflow/gmflow-pretrained
+scripts/superglue/weights/
 
 
 # unnecessary files
