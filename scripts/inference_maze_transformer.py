@@ -235,13 +235,15 @@ class HighLevelController:
         '''
         move with velocity vx, vy, vyaw
         '''
-        elapsed_time, start_time = 1.0, time.time()
-        for i in range(int(elapsed_time / self.dt)):
-            self.client.Move(vx, vy, vyaw)
-            time.sleep(self.dt)
-        self.client.StopMove()
-        end_time = time.time()
-        if log: print_color(f"acted {vx, vy, vyaw}, for {end_time-start_time} s")
+        with self.lock:
+            elapsed_time, start_time = 1.0, time.time()
+            for i in range(int(elapsed_time / self.dt)):
+                self.client.Move(vx, vy, vyaw)
+                time.sleep(self.dt)
+            self.client.StopMove()
+            if log: 
+                end_time = time.time()
+                print_color(f"acted {vx, vy, vyaw}, for {end_time-start_time} s")
 
     def forward(self, log=False):
         self.move(self.forward_distance, 0, 0, log)
