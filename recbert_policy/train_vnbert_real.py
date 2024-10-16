@@ -1,4 +1,4 @@
-import argparse, os
+import argparse, cv2
 import os.path as osp
 import random
 from datetime import timedelta
@@ -14,7 +14,7 @@ from torch.cuda.amp import GradScaler, autocast
 from torch.nn import functional as F
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data import DataLoader, Dataset, DistributedSampler
-from torchvision.transforms import ColorJitter, Compose, RandomResizedCrop, ToPILImage
+from torchvision.transforms import ColorJitter, Compose, RandomResizedCrop, ToPILImage, Resize
 
 from recbert_policy.vnbert import VNBERTPolicy
 from utils.basic_utils import (
@@ -29,13 +29,16 @@ from utils.basic_utils import (
     select_prominent_frames
 )
 
-
+def load_SA(data_dir):
+    video_frames = mp42np(osp.join(data_dir, 'rgb_video.mp4'), way='ffmpeg')[:-2]  # drop the last frame corresponding to the "STOP"
+    all_data = read_json(osp.join(data_dir,'data.json'))
+    action_indices = all_data['true_actions'][1:]  # TODO 
+    return video_frames, action_indices 
 
 class NewDataset(Dataset):
-    def __init__(self, data_dir, num_action=9, num_context_sample=900, horizon=30):
+    def __init__(self, data_dir, num_action=9, horizon=30):
         self.data_dir = data_dir
         self.num_action = num_action
-        self.num_context_sample = num_context_sample
         self.horizon = horizon
         self.augment = Compose([
             ToPILImage(),
@@ -43,23 +46,34 @@ class NewDataset(Dataset):
             ColorJitter(brightness=0.1, contrast=0.1, saturation=0.1, hue=0.1),
         ])
         self.switch_dataset()
-        
+
+    def check_video_action(self, video_frames, actions, istart=0):
+        action_space =  ["MoveAhead", "RotateLeft", "RotateRight", "Stop"]
+        for i in range(istart, len(video_frames)):
+            frame, true_action = video_frames[i], actions[i]
+            frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+            cv2.putText(frame, f'true:{action_space[true_action]}', (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 200), 2, cv2.LINE_AA)
+            # cv2.putText(frame, f'pred:{action_space[pred_action]}', (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2, cv2.LINE_AA)
+            cv2.imshow(f'timestep:{i}', frame)
+            if cv2.waitKey(1500) & 0xFF == ord('q'):
+                break
+            cv2.destroyAllWindows()
+
     def load_dataset(self, data_dir):
-        self.video_frames = mp42np(osp.join(data_dir, 'rgb_video.mp4'), way='ffmpeg')[:-1]  # drop the last frame corresponding to the "STOP"
-        all_data = read_json(osp.join(data_dir,'data.json'))
-        self.action_indices = all_data['pred_action_indices'] 
+        self.video_frames, self.action_indices = load_SA(data_dir)
+        # self.check_video_action(self.video_frames, self.action_indices, 0)
         if self.num_action > 3: self.action_indices = self.action_with_duration(self.action_indices)
         self.action_indices = torch.LongTensor(self.action_indices)
-        self.goal_timestep_list = all_data['objects']
         # sample context
-        self.context_ids = remove_similar_frames(self.video_frames, self.num_context_sample, percent=torch.randint(70, 95, (1,)).item())
-        self.context_ids = torch.from_numpy(self.context_ids)
+        self.context_ids = torch.arange(len(self.video_frames))
         self.context_frames = torch.from_numpy(np.stack([np.array(self.augment(self.video_frames[i])) for i in self.context_ids]))
         self.context_actions = self.action_indices[self.context_ids]
 
     def switch_dataset(self,):
-        self.cur_data_dir = random.choice(glob(osp.join(self.data_dir, '*')))
-        self.load_dataset(self.cur_data_dir)
+        cur_data_dir = random.choice(glob(osp.join(self.data_dir, '*')))
+        if not hasattr(self, 'cur_data_dir') or cur_data_dir != self.cur_data_dir:
+            self.cur_data_dir = cur_data_dir
+            self.load_dataset(self.cur_data_dir)
 
     def action_with_duration(self, actions, k=3):
         new_actions = []
@@ -77,9 +91,9 @@ class NewDataset(Dataset):
     def __getitem__(self, idx):
         if idx < self.horizon:
             idx = np.random.choice(range(self.horizon, len(self.action_indices)))
-        goal = torch.from_numpy(self.video_frames[idx])
+        goal = torch.from_numpy(np.array(self.augment(self.video_frames[idx])))
         idxs = np.arange(idx-self.horizon, idx)
-        state = torch.from_numpy(self.video_frames[idxs])
+        state = torch.from_numpy(np.stack([np.array(self.augment(self.video_frames[i])) for i in idxs]))
         action = self.action_indices[idxs]
         return goal, state, action
 
@@ -94,12 +108,11 @@ class Trainer(nn.Module):
         self.device = args.device
 
         # dataloader
-        self.dataset = NewDataset(args.data_dir,num_action=args.num_action,num_context_sample=args.num_context_sample, horizon=args.horizon)
+        self.dataset = NewDataset(args.data_dir, num_action=args.num_action, horizon=args.horizon)
         self.dataloader = DataLoader(self.dataset, batch_size=args.batch_size, shuffle=True, num_workers=16, pin_memory=True)
 
         # model
         self.policy = VNBERTPolicy(args.num_action, args.action_emb_size, args.temporal_net).to(self.device)
-        
 
         # optimizer
         self.optimizer = self.configure_optimizers()
@@ -114,8 +127,11 @@ class Trainer(nn.Module):
             "|param|value|\n|-|-|\n%s" % ("\n".join([f"|{key}|{value}|" for key, value in train_config_dict.items()]),),
         )
 
+        # load pretrain ckpt
         self.load(args.pretrain_ckpt)
-        self.scaler = GradScaler()
+
+        # half precision
+        self.scaler = GradScaler() if args.half_precision else None
 
     def configure_optimizers(self,):
         """
@@ -174,6 +190,54 @@ class Trainer(nn.Module):
             self.policy.load_state_dict(state_dict,strict=True)
             print(f'{"[ Partially ]" if is_partial else ""} load pretrain ckpt from {pretrain_ckpt}') 
 
+    def cal_loss(self, goal, state, action):
+        loss_dict = {}
+        B, T, A = state.size(0), state.size(1), self.args.num_action
+        
+        q_logits, a_logits = torch.empty((B,T,self.policy.hidden_size), device=self.device), torch.empty((B,T,A), device=self.device)
+        st, enc_context, context_frame_embs = self.policy.enc_context(self.dataset.context_frames.to(self.device), self.dataset.context_actions.to(self.device))  # (1, 1, Dc), (1, Tc+1, Dc), (Tc, Dcf)
+        enc_pure_context = enc_context[:,1:,:]  # (1, Tc, Dc)
+        goal_repr = self.policy.goal_encoder(goal) 
+
+        for t in range(self.args.horizon):
+            enc_context = torch.cat((st, enc_pure_context.repeat(len(st),1,1)), dim=1)
+            st, logit = self.policy.enc_step(enc_context, goal_repr, state[:,t])  # (B, Dc), (B, A)
+            q_logits[:,t:t+1], a_logits[:,t] = st, logit
+        
+        # loss action
+        loss_dict['loss_action'] = F.cross_entropy(a_logits.view(-1,A), action.view(-1))
+
+        # loss termination
+        termination = torch.zeros((B, T, 1),dtype=torch.long).to(self.device).detach()
+        termination[:,-1] = 1
+        terminal_logits = self.policy.termination_head(q_logits)
+        loss_dict['loss_termination'] = F.cross_entropy(terminal_logits.view(-1,2), termination.view(-1))
+
+        # loss temporal
+        if self.policy.temporal_predictor is not None:
+            t_idxs = self.dataset.context_ids.to(self.device)
+            permt_idxs = t_idxs[torch.randperm(len(self.dataset.context_ids))].to(self.device)
+            loss_dict['loss_temporal'] = 0.5 * F.binary_cross_entropy_with_logits(
+                torch.cat([self.policy.temporal_predictor(context_frame_embs), self.policy.temporal_predictor(context_frame_embs[permt_idxs])], dim=-1), 
+                F.one_hot((t_idxs < permt_idxs).long()).float()
+            )
+
+        # loss bcq
+        q_value = self.policy.critic_head(q_logits)  # (B, T, A)
+        cur_Q = q_value.gather(-1, action.unsqueeze(-1))
+        with torch.no_grad():
+            # next
+            logits_q_next = q_value.roll(-1, 1)
+            probs_a_next = F.log_softmax(a_logits,-1).exp().roll(-1, 1)
+            probs_a_next = (probs_a_next / probs_a_next.max(-1, keepdim=True)[0] > self.args.action_thresh).float()
+            next_actions = (probs_a_next * logits_q_next + (1 - probs_a_next) * -1e8).argmax(-1, keepdim=True)
+            # TD_target = rewards + gamma * nextqtarget(nexts, nexta)
+            logits_q_target_next = self.policy.target_critic_head(q_logits.roll(-1, 1))
+            TD_target = termination + self.args.gamma * logits_q_target_next.gather(-1, next_actions) * (1 - termination)
+        loss_dict['loss_bcq'] = F.smooth_l1_loss(cur_Q, TD_target)    
+        loss_dict['loss_action_logits_norm'] = 0.01 * a_logits.pow(2).mean()
+
+        return loss_dict
 
     def rollout(self):
         seed_everything(42)
@@ -182,61 +246,20 @@ class Trainer(nn.Module):
             for goal, state, action in self.dataloader:
                 goal, state, action = goal.to(self.device), state.to(self.device), action.to(self.device) # (B, H, W, C), (B, T, H, W, C), (B,T)
 
-                loss_dict = {}
-                B, T, A = state.size(0), state.size(1), self.args.num_action
-                with autocast(dtype=torch.float16):
-                    q_logits, a_logits = torch.empty((B,T,self.policy.hidden_size), device=self.device), torch.empty((B,T,A), device=self.device)
-                    st, enc_context, context_frame_embs = self.policy.enc_context(self.dataset.context_frames.to(self.device), self.dataset.context_actions.to(self.device))  # (1, 1, Dc), (1, Tc+1, Dc), (Tc, Dcf)
-                    enc_pure_context = enc_context[:,1:,:]  # (1, Tc, Dc)
-                    goal_repr = self.policy.goal_encoder(goal) 
-
-                    for t in range(self.args.horizon):
-                        enc_context = torch.cat((st, enc_pure_context.repeat(len(st),1,1)), dim=1)
-                        st, logit = self.policy.enc_step(enc_context, goal_repr, state[:,t])  # (B, Dc), (B, A)
-                        q_logits[:,t:t+1], a_logits[:,t] = st, logit
-                    
-                    # loss action
-                    loss_dict['loss_action'] = F.cross_entropy(a_logits.view(-1,A), action.view(-1))
-
-                    # loss termination
-                    termination = torch.zeros((B, T, 1),dtype=torch.long).to(self.device).detach()
-                    termination[:,-1] = 1
-                    terminal_logits = self.policy.termination_head(q_logits)
-                    loss_dict['loss_termination'] = F.cross_entropy(terminal_logits.view(-1,2), termination.view(-1))
-
-                    # loss temporal
-                    if self.policy.temporal_predictor is not None:
-                        t_idxs = self.dataset.context_ids.to(self.device)
-                        permt_idxs = t_idxs[torch.randperm(len(self.dataset.context_ids))].to(self.device)
-                        loss_dict['loss_temporal'] = 0.5 * F.binary_cross_entropy_with_logits(
-                            torch.cat([self.policy.temporal_predictor(context_frame_embs), self.policy.temporal_predictor(context_frame_embs[permt_idxs])], dim=-1), 
-                            F.one_hot((t_idxs < permt_idxs).long()).float()
-                        )
-
-                    # loss bcq
-                    q_value = self.policy.critic_head(q_logits)  # (B, T, A)
-                    cur_Q = q_value.gather(-1, action.unsqueeze(-1))
-                    with torch.no_grad():
-                        # next
-                        logits_q_next = q_value.roll(-1, 1)
-                        probs_a_next = F.log_softmax(a_logits,-1).exp().roll(-1, 1)
-                        probs_a_next = (probs_a_next / probs_a_next.max(-1, keepdim=True)[0] > self.args.action_thresh).float()
-                        next_actions = (probs_a_next * logits_q_next + (1 - probs_a_next) * -1e8).argmax(-1, keepdim=True)
-                        # TD_target = rewards + gamma * nextqtarget(nexts, nexta)
-                        logits_q_target_next = self.policy.target_critic_head(q_logits.roll(-1, 1))
-                        TD_target = termination + self.args.gamma * logits_q_target_next.gather(-1, next_actions) * (1 - termination)
-                    loss_dict['loss_bcq'] = F.smooth_l1_loss(cur_Q, TD_target)    
-                    loss_dict['loss_action_logits_norm'] = 0.01 * a_logits.pow(2).mean()
-
-                    # backward loss
-                    loss_dict['loss_total'] = loss = sum([1.0 * v for k, v in loss_dict.items()])
-
-                self.optimizer.zero_grad()
-                # loss.backward()  
-                # self.optimizer.step()
-                self.scaler.scale(loss).backward()  
-                self.scaler.step(self.optimizer)
-                self.scaler.update()
+                if self.scaler is not None:
+                    with autocast(dtype=torch.float16):
+                        loss_dict = self.cal_loss(goal, state, action)
+                    loss = sum([1.0 * v for k, v in loss_dict.items()])
+                    self.optimizer.zero_grad()
+                    self.scaler.scale(loss).backward()  
+                    self.scaler.step(self.optimizer)
+                    self.scaler.update()
+                else:
+                    loss_dict = self.cal_loss(goal, state, action)
+                    loss = sum([1.0 * v for k, v in loss_dict.items()])
+                    self.optimizer.zero_grad()
+                    loss.backward()  
+                    self.optimizer.step()
 
                 self.policy.polyak_target_update()
 
@@ -266,7 +289,7 @@ class Visualizer(nn.Module):
         args = update_args_from_json(args, osp.join(osp.dirname(args.pretrain_ckpt), 'config.json'))
         # args.data_dir = f'offline-dataset/mp3d-dataset/900/val'
         self.policy = VNBERTPolicy(args.num_action, args.action_emb_size, args.temporal_net).to(args.device)
-        self.dataset = NewDataset(args.data_dir,num_action=args.num_action,num_context_sample=args.num_context_sample, horizon=args.horizon)
+        self.dataset = NewDataset(args.data_dir,num_action=args.num_action, horizon=args.horizon)
 
         self.load(ckpt_file)
 
@@ -347,15 +370,14 @@ class Visualizer(nn.Module):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--domain', type=str, default='robothor')
-    parser.add_argument('--data_dir', type=str, default="")
-    parser.add_argument('--save_dir', type=str, default='logs/logsingle-robothor-bert')
+    parser.add_argument('--data_dir', type=str, default="offline-dataset/maze-dataset")
+    parser.add_argument('--save_dir', type=str, default='logs')
     parser.add_argument('--exp_name', type=str, default='')
     parser.add_argument('--pretrain_ckpt', '-c', type=str, default='')
     parser.add_argument('--num_action', type=int, default=9)
     parser.add_argument('--action_emb_size', type=int, default=256)
     parser.add_argument('--action_thresh', type=float, default=0.5)
-    parser.add_argument('--temporal_net', type=str, default='ranknet')
-    parser.add_argument('--num_context_sample', type=int, default=900)
+    parser.add_argument('--temporal_net', type=str, default='none')
     parser.add_argument('--gamma', type=float, default=0.99)
     parser.add_argument('--lr', type=float, default=1e-4)
     parser.add_argument('--betas', type=float, default=(0.9, 0.95))
@@ -364,13 +386,12 @@ if __name__ == '__main__':
     parser.add_argument('--batch_size', type=int, default=6)  # as large as possible
     parser.add_argument('--horizon', type=int, default=30)      # as small as possible
     parser.add_argument('--max_grad_norm', type=float, default=1.0)
-    parser.add_argument('--log_interval', type=int, default=10)
+    parser.add_argument('--log_interval', type=int, default=50)
     parser.add_argument('--switch_interval', type=int, default=100)
-    parser.add_argument('--save_interval', type=int, default=400)
+    parser.add_argument('--save_interval', type=int, default=1000)
+    parser.add_argument('--half_precision', type=int, default=0)
     
     args, unknown = parser.parse_known_args()
-    args.data_dir = f'offline-dataset/{args.domain}-dataset/900/train'
-    args.save_dir = f'logs/logsingle-{args.domain}-bert' 
     args.device = f'cuda'
 
     mode = 'train'#'vis'

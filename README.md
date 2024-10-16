@@ -12,7 +12,7 @@ After watching an 30-second egocentric video, an agent is expected to reason how
 conda create -n nolo python=3.9
 conda activate nolo
 cd nolo
-pip install -r requirements.txt
+pip install -r docs/requirements.txt
 ```
 
 ### 1.2 Install RoboTHOR and Habitat 🍔
@@ -79,5 +79,23 @@ bash bash/eval_$domain$_baseline.sh  $baseline$
 - Evaluate VN-Bert policy (NOLO) in `'robothor' or 'habitat'`. Ablation variants and cross-domain evaluation are also supported.
 ```bash
 bash bash/eval_habitat_policymode.sh  "nolo-bert" $checkpoint_path$ "Q" "SA"
+```
+## 5. Real World Experiments! 
+- Collect random RGB and action sequence
+```bash
+python scripts/collect_maze.py
+``` 
+- Decode actions from recorded video:
+```bash
+python scripts/label_maze.py
+```
+- Train a policy using BCQ in real world maze environment.
+```bash
+python -m recbert_policy.train_vnbert_real --exp_name maze
+```
+- Evaluate the trained policy
+```bash
+cd ..
+python scripts/inference_maze_transformer.py
 ```
 

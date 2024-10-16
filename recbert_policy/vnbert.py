@@ -18,8 +18,8 @@ from torchvision.transforms.v2 import Compose, Normalize
 from transformers import BertConfig, BertPreTrainedModel
 
 from utils.basic_utils import remove_similar_frames
-from pytorch_grad_cam import GradCAMPlusPlus, ScoreCAM, GradCAM, AblationCAM, XGradCAM, EigenCAM, EigenGradCAM, LayerCAM, FullGrad, HiResCAM
-from pytorch_grad_cam.utils.image import show_cam_on_image
+# from pytorch_grad_cam import GradCAMPlusPlus, ScoreCAM, GradCAM, AblationCAM, XGradCAM, EigenCAM, EigenGradCAM, LayerCAM, FullGrad, HiResCAM
+# from pytorch_grad_cam.utils.image import show_cam_on_image
 
 
 def gelu(x):
@@ -42,7 +42,7 @@ ACT2FN = {"gelu": gelu, "relu": torch.nn.functional.relu, "swish": swish}
 #     from apex.normalization.fused_layer_norm import FusedLayerNorm as BertLayerNorm  # TODO
 # except (ImportError, AttributeError) as e:
 #     logger.info("Better speed can be achieved with apex installed from https://www.github.com/nvidia/apex .")
-BertLayerNorm = torch.nn.LayerNorm
+# BertLayerNorm = torch.nn.LayerNorm
 
 class BertEmbeddings(nn.Module):
     """Construct the embeddings from word, position and token_type embeddings.
@@ -413,7 +413,7 @@ class VNBertModule(BertPreTrainedModel):
 
 
 def get_vlnbert_modules(input_dim):
-    vis_config = BertConfig.from_pretrained('bert-base-uncased', local_files_only=True)#
+    vis_config = BertConfig.from_pretrained('bert-base-uncased')#, local_files_only=True
     # TODO: modify theoriginal bert config
     vis_config.input_dim = input_dim
     vis_config.img_feature_type = ""
@@ -488,7 +488,7 @@ class ClipEncoder(nn.Module):
 
 
 class VNBERTPolicy(nn.Module):
-    def __init__(self, num_action=9, action_emb_size=256, temporal_net='ranknet'):
+    def __init__(self, num_action=9, action_emb_size=256, temporal_net='none'):
         super(VNBERTPolicy, self).__init__()
         print('\nInitalizing the VLN-BERT model ...')
         obs_emb_dim = 512
@@ -644,7 +644,7 @@ class VNBERTPolicy(nn.Module):
 
 
 class Pi(VNBERTPolicy):
-    def __init__(self, dataset, ckpt_file='', num_context_sample=900, mode='Q',context_type='S',**kwargs):
+    def __init__(self, dataset, ckpt_file='', num_context_sample=900, mode='Q',context_type='SA',**kwargs):
         super(Pi, self).__init__(temporal_net=kwargs['temporal_net'])
         self.mode = mode
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
