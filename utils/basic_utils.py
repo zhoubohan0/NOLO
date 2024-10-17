@@ -12,6 +12,17 @@ def mp42np(mp4_file, way='ffmpeg'):
         return np.stack([im.asnumpy() for im in decord.VideoReader(mp4_file, num_threads=16)])
     elif way == 'ffmpeg':
         return np.stack([im for im in imageio.get_reader(mp4_file,  'ffmpeg')])
+    elif way == 'cv2':
+        cap = cv2.VideoCapture(mp4_file)
+        frames = []
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                break
+            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            frames.append(frame)
+        cap.release()
+        return np.stack(frames)
 
 def save_json(data, filename):
     with open(filename, 'w') as f:

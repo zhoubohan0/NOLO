@@ -30,7 +30,7 @@ from utils.basic_utils import (
 )
 
 def load_SA(data_dir):
-    video_frames = mp42np(osp.join(data_dir, 'rgb_video.mp4'), way='ffmpeg')[:-2]  # drop the last frame corresponding to the "STOP"
+    video_frames = mp42np(osp.join(data_dir, 'rgb_video.mp4'), way='cv2')[:-2]  # drop the last frame corresponding to the "STOP"
     all_data = read_json(osp.join(data_dir,'data.json'))
     action_indices = all_data['true_actions'][1:]  # TODO 
     return video_frames, action_indices 

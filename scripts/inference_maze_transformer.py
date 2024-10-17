@@ -92,10 +92,9 @@ class Policy(VNBERTPolicy):
                 self.enc_pure_context = torch.zeros(1, self.num_context_sample, self.hidden_size).to(self.device)
         self.goal_emb = None
         self.stored_actions = dict(last_action=-1,duration=-1,action_prob=0)
-        return self
 
     def set_goal(self, goal_frame):
-        self.goal_emb = self.goal_encoder(torch.from_numpy(goal_frame).to(self.device).unsqueeze(0))
+        self.goal_emb = self.goal_encoder(torch.from_numpy(np.array(self.augment(goal_frame))).to(self.device).unsqueeze(0))
 
     def act(self, rgb_frame):
         assert self.goal_emb is not None
@@ -103,7 +102,7 @@ class Policy(VNBERTPolicy):
         if self.stored_actions['duration'] == -1:  # generate a new action
             with torch.no_grad():
                 enc_context = torch.cat((self.st, self.enc_pure_context), dim=1)
-                self.st, logit = self.enc_step(enc_context, self.goal_emb, torch.from_numpy(rgb_frame.copy()).to(self.device).unsqueeze(0))
+                self.st, logit = self.enc_step(enc_context, self.goal_emb, torch.from_numpy(np.array(self.augment(rgb_frame))).to(self.device).unsqueeze(0))
                 q_value = self.critic_head(self.st).squeeze(1)          # (1, N)
                 action_dist = F.log_softmax(logit,-1).exp()             # (1, N)
                 self.keep_mode = action_dist.shape[-1] > 3
@@ -204,8 +203,6 @@ class HighLevelController:
         # Schedule the async tasks
         asyncio.run_coroutine_threadsafe(self.start_processing(), self.loop)
 
-        print('Start Remote control to collect trajectories!')
-
     '''core functions'''
     def move(self, vx, vy, vyaw, log=False):
         '''
@@ -271,17 +268,21 @@ class HighLevelController:
     def start_single_nav_task(self, data_dir, goal_dir, ckpt_file):
         goal_image_files = glob(os.path.join(goal_dir, '*_*.png'))
         goal_image_files = rearrange(goal_image_files)
-        goal_images = [imageio.imread(f) for f in goal_image_files]
+        goal_images = [imageio.v2.imread(f) for f in goal_image_files]
         # load dataset and initialize the agent
-        # agent = Policy(load_SA(data_dir), ckpt_file, )
-        # agent = agent.reset().to(agent.device)
+        agent = Policy(load_SA(data_dir), ckpt_file, )
+        agent.to(agent.device).reset()
         # iter all goal images and act till completion
-        for goal_image in goal_images:
-            # agent.set_goal(goal_image)
+        print(f'Agent is reset! Begin to navigate.')
+        for igoal, (goal_file, goal_image) in enumerate(zip(goal_image_files, goal_images)):
+            print(f'{igoal}th goal: {goal_file}')
+            agent.set_goal(goal_image)
             obs = self.observe()['rgb']
             for t in range(200):
-                action = np.random.choice(3)#agent.act(obs)
-                obs = self.step(action)
+                action = agent.act(obs)
+                print(f'timestep: {t} | action:{action}')
+                #action = np.random.choice(3)
+                obs = self.step(action)['rgb']
 
     '''auxiliary functions'''    
     def standdown(self):
