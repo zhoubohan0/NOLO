@@ -63,7 +63,7 @@ class NewDataset(Dataset):
 
     def load_dataset(self, data_dir):
         self.video_frames, self.action_indices = load_SA(data_dir)
-        self.check_video_action(self.video_frames, self.action_indices, 0)
+        # self.check_video_action(self.video_frames, self.action_indices, 0)
         if self.num_action > 3: self.action_indices = self.action_with_duration(self.action_indices)
         self.action_indices = torch.LongTensor(self.action_indices)
         # sample context
@@ -377,7 +377,7 @@ if __name__ == '__main__':
     parser.add_argument('--exp_name', type=str, default='')
     parser.add_argument('--pretrain_ckpt', '-c', type=str, default='')
     parser.add_argument('--num_action', type=int, default=9)
-    parser.add_argument('--action_emb_size', type=int, default=64)
+    parser.add_argument('--action_emb_size', type=int, default=256)
     parser.add_argument('--action_thresh', type=float, default=0.5)
     parser.add_argument('--temporal_net', type=str, default='none')
     parser.add_argument('--gamma', type=float, default=0.99)
@@ -385,12 +385,12 @@ if __name__ == '__main__':
     parser.add_argument('--betas', type=float, default=(0.9, 0.95))
     parser.add_argument('--weight_decay', type=float, default=0.1)
     parser.add_argument('--epoch', type=int, default=2000000)
-    parser.add_argument('--batch_size', type=int, default=16)  # as large as possible
-    parser.add_argument('--horizon', type=int, default=30)      # as small as possible
+    parser.add_argument('--batch_size', type=int, default=32)  # as large as possible
+    parser.add_argument('--horizon', type=int, default=10)      # as small as possible
     parser.add_argument('--max_grad_norm', type=float, default=1.0)
-    parser.add_argument('--log_interval', type=int, default=50)
-    parser.add_argument('--switch_interval', type=int, default=20)
-    parser.add_argument('--save_interval', type=int, default=1000)
+    parser.add_argument('--log_interval', type=int, default=10)
+    parser.add_argument('--switch_interval', type=int, default=10)
+    parser.add_argument('--save_interval', type=int, default=500)
     parser.add_argument('--half_precision', type=int, default=0)
     
     args, unknown = parser.parse_known_args()
