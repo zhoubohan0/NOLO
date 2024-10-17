@@ -401,7 +401,7 @@ def check_collection(directory, istart=0):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--data_dir', type=str, default='offline-dataset/maze-dataset')
-    parser.add_argument('--is_check', type=int, default=0)
+    parser.add_argument('--is_check', default=False, action='store_true')
     args = parser.parse_args()
     if args.is_check:
         args.record_dir = os.path.join(args.data_dir, f"{len(os.listdir(args.data_dir))-1}")

@@ -33,7 +33,7 @@ def load_SA(data_dir):
     all_data = read_json(osp.join(data_dir,'data.json'))
     action_indices = all_data['true_actions'][1:]  # TODO 
     video_frames = mp42np(osp.join(data_dir, 'rgb_video.mp4'), way='cv2')
-    video_frames = video_frames[:-(len(video_frames)-len(action_indices)+1)]  # drop the last frame corresponding to the "STOP"
+    video_frames = video_frames[:-(len(video_frames)-len(action_indices))]  # drop the last frame corresponding to the "STOP"
     return video_frames, action_indices 
 
 class NewDataset(Dataset):
@@ -49,6 +49,7 @@ class NewDataset(Dataset):
         self.switch_dataset()
 
     def check_video_action(self, video_frames, actions, istart=0):
+        print(f"frames: {len(video_frames)} | actions: {len(actions)}")
         action_space =  ["MoveAhead", "RotateLeft", "RotateRight", "Stop"]
         for i in range(istart, len(video_frames)):
             frame, true_action = video_frames[i], actions[i]
