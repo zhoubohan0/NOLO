@@ -387,7 +387,7 @@ def check_collection(directory, istart=0):
     with open(os.path.join(directory, 'data.json'), 'r') as f:
         data = json.load(f)
         actions = data['true_actions']
-    print(f"frames: {video_frames.shape} | actions: {actions.shape}")
+    print(f"frames: {video_frames.shape} | actions: {len(actions)}")
     action_space =  ["MoveAhead", "RotateLeft", "RotateRight", "Stop"]
     for i in range(istart, len(video_frames)):
         frame, true_action = video_frames[i], actions[i]
