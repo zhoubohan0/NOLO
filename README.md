@@ -95,7 +95,6 @@ python -m recbert_policy.train_vnbert_real --exp_name maze
 ```
 - Evaluate the trained policy
 ```bash
-cd ..
-python scripts/inference_maze_transformer.py
+python -m scripts.inference_maze_transformer
 ```
 

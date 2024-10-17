@@ -1,4 +1,4 @@
-import random, torch, numpy as np, decord, imageio, json, cv2, os
+import random, torch, numpy as np, imageio, json, cv2, os#, decord
 
 def seed_everything(seed):
     random.seed(seed)

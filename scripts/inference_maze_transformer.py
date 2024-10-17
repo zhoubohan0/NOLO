@@ -37,46 +37,27 @@ def print_color(msg, color="green"):
     else:
         print(msg)
 
-def shuffle_no_adjacent(items):
-    """
-    Shuffle a list of items in the format 'category_number' (e.g., 'a_1', 'b_2') such that
-    no two adjacent elements belong to the same category.
-
-    Parameters:
-    - items (list of str): The list of items to shuffle.
-
-    Returns:
-    - list of str: A shuffled list with no adjacent items from the same category.
-    """
-    # Step 1: Group the elements by category (part before '_')
+def rearrange(items):
     category_dict = defaultdict(list)
     for item in items:
-        category = item.split('_')[0]  # Extract the category before '_'
+        category = os.path.basename(item).split('_')[0]  # Extract the category before '_'
         category_dict[category].append(item)
+    for category in category_dict:
+        np.random.shuffle(category_dict[category])
+    result = []
+    while category_dict:
+        removed_categories = []
+        for category in list(category_dict):
+            if category_dict[category]:
+                result.append(category_dict[category].pop(0))  # Take the first element from the category list
+            if not category_dict[category]:  # If the category list is empty, mark it for removal
+                removed_categories.append(category)
 
-    # Step 2: Sort categories by the number of elements (largest first)
-    categories = sorted(category_dict.keys(), key=lambda x: len(category_dict[x]), reverse=True)
+        # Remove categories that are out of elements
+        for category in removed_categories:
+            del category_dict[category]
 
-    # Step 3: Interleave the elements ensuring no adjacent items from the same category
-    def interleave(categories, category_dict):
-        result = []
-        max_items = sum(len(category_dict[cat]) for cat in categories)
-
-        while len(result) < max_items:
-            for category in categories:
-                if category_dict[category]:  # Add an element from the current category
-                    if not result or result[-1].split('_')[0] != category:  # No adjacent duplicates
-                        result.append(category_dict[category].pop(0))
-                    else:
-                        # Try the next category if adjacent elements would match
-                        for next_category in categories:
-                            if next_category != category and category_dict[next_category]:
-                                result.append(category_dict[next_category].pop(0))
-                                break
-        return result
-
-    # Generate and return the shuffled result
-    return interleave(categories, category_dict)
+    return result
 
 class Policy(VNBERTPolicy):
     def __init__(self, dataset, ckpt_file='', mode='Q',context_type='SA',**kwargs):
@@ -97,8 +78,6 @@ class Policy(VNBERTPolicy):
             ckpt = {k.replace('module.','') if 'module.' in k else k:v for k,v in ckpt.items()}
             self.load_state_dict(ckpt,strict=True)
             print(f'Load checkpoint from {ckpt_file}')
-        else:
-            raise ValueError('Please provide a checkpoint file!')
         
     def reset(self,):
         # pre-compute fixed context embeddings using trained state encoder
@@ -218,9 +197,6 @@ class HighLevelController:
 
         self.xyz = self.observe()['position']
 
-        # reset signal recognizer 
-        self.reset_signal_recognizer()
-
         # Create and run the event loop in a separate thread
         self.loop = asyncio.new_event_loop()
         self.thread = threading.Thread(target=self.run_loop, args=(self.loop,))
@@ -294,17 +270,17 @@ class HighLevelController:
 
     def start_single_nav_task(self, data_dir, goal_dir, ckpt_file):
         goal_image_files = glob(os.path.join(goal_dir, '*_*.png'))
-        goal_image_files = shuffle_no_adjacent(goal_image_files)
+        goal_image_files = rearrange(goal_image_files)
         goal_images = [imageio.imread(f) for f in goal_image_files]
         # load dataset and initialize the agent
-        agent = Policy(load_SA(data_dir), ckpt_file, )
-        agent = agent.reset().to(agent.device)
+        # agent = Policy(load_SA(data_dir), ckpt_file, )
+        # agent = agent.reset().to(agent.device)
         # iter all goal images and act till completion
         for goal_image in goal_images:
-            agent.set_goal(goal_image)
+            # agent.set_goal(goal_image)
             obs = self.observe()['rgb']
             for t in range(200):
-                action = agent.act(obs)
+                action = np.random.choice(3)#agent.act(obs)
                 obs = self.step(action)
 
     '''auxiliary functions'''    
