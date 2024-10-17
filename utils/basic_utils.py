@@ -22,7 +22,7 @@ def mp42np(mp4_file, way='ffmpeg'):
             frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             frames.append(frame)
         cap.release()
-        return np.stack(frames)
+        return np.array(frames)
 
 def save_json(data, filename):
     with open(filename, 'w') as f:

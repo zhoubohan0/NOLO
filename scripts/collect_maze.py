@@ -1,5 +1,6 @@
+import json
 import cv2
-import os, argparse
+import os, argparse, sys
 import numpy as np
 import time
 import threading
@@ -9,13 +10,14 @@ import logging
 import imageio.v2 as iio
 import math
 from collections import deque
+sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+from utils.basic_utils import mp42np
 from unitree_sdk2py.core.channel import ChannelSubscriber, ChannelFactortyInitialize
 from unitree_sdk2py.idl.default import unitree_go_msg_dds__SportModeState_
 from unitree_sdk2py.idl.unitree_go.msg.dds_ import SportModeState_
 from unitree_sdk2py.idl.default import unitree_go_msg_dds__WirelessController_
 from unitree_sdk2py.idl.unitree_go.msg.dds_ import WirelessController_
 from unitree_sdk2py.go2.sport.sport_client import SportClient, PathPoint, SPORT_PATH_POINT_SIZE
-
 
 # constants
 MIN_VSPEED = 1e-7
@@ -80,7 +82,7 @@ class WirelessHighLevelController:
         self.forward_distance, self.turn_angle = forward_distance, turn_angle
         self.action_names = ['forward', 'turn_left', 'turn_right', 'backward']
         self.rgb_writer = iio.get_writer(record_file, fps=10) if record_file else None
-        self.act_file = record_file.replace('.mp4', '.npy') if record_file else ''
+        self.act_file = os.path.join(os.path.dirname(record_file), 'data.json') if record_file else ''
         self.act_record = []
         # Initialize lock for thread-safe operations
         self.lock = threading.Lock()
@@ -357,7 +359,10 @@ class WirelessHighLevelController:
                 self.rgb_writer.append_data(next_obs['rgb'])
                 self.act_record.append(self.action_names.index(action))
                 if len(self.act_record) % 10 == 0:
-                    np.save(self.act_file, np.array(self.act_record))
+                    # np.save(self.act_file, np.array(self.act_record))
+                    with open(self.act_file, 'w') as f:
+                        json.dump(dict(true_actions=self.act_record), f, indent=4)
+                    print(f"Frames: {len(self.act_record)} | Saved to {self.act_file}")
     
     def WirelessMove(self):
         '''
@@ -377,9 +382,32 @@ class WirelessHighLevelController:
         else:
             return 'stop'
 
+def check_collection(directory, istart=0):
+    video_frames = mp42np(os.path.join(directory, "rgb_video.mp4"), way='cv2')
+    actions = np.load(os.path.join(directory, "action.npy"))
+    print(f"frames: {video_frames.shape} | actions: {actions.shape}")
+    action_space =  ["MoveAhead", "RotateLeft", "RotateRight", "Stop"]
+    for i in range(istart, len(video_frames)):
+        frame, true_action = video_frames[i], actions[i]
+        frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+        cv2.putText(frame, f'true:{action_space[true_action]}', (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 200), 2, cv2.LINE_AA)
+        # cv2.putText(frame, f'pred:{action_space[pred_action]}', (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2, cv2.LINE_AA)
+        cv2.imshow(f'timestep:{i}', frame)
+        if cv2.waitKey(1500) & 0xFF == ord('q'):
+            break
+        cv2.destroyAllWindows()
     
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--record_file', type=str, default='offline-dataset/maze-dataset/0/rgb_video.mp4')
+    parser.add_argument('--data_dir', type=str, default='offline-dataset/maze-dataset')
+    parser.add_argument('--is_check', type=int, default=0)
     args = parser.parse_args()
-    whlc = WirelessHighLevelController(record_file=args.record_file)
+    if args.is_check:
+        args.record_dir = os.path.join(args.data_dir, f"{len(os.listdir(args.data_dir))-1}")
+        check_collection(args.record_dir)
+    else:
+        args.record_dir = os.path.join(args.data_dir, f"{len(os.listdir(args.data_dir))}")
+        args.record_file = os.path.join(args.record_dir, "rgb_video.mp4")
+        os.makedirs(args.record_dir, exist_ok=True)
+        whlc = WirelessHighLevelController(record_file=args.record_file)

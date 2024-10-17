@@ -30,9 +30,10 @@ from utils.basic_utils import (
 )
 
 def load_SA(data_dir):
-    video_frames = mp42np(osp.join(data_dir, 'rgb_video.mp4'), way='cv2')[:-2]  # drop the last frame corresponding to the "STOP"
     all_data = read_json(osp.join(data_dir,'data.json'))
     action_indices = all_data['true_actions'][1:]  # TODO 
+    video_frames = mp42np(osp.join(data_dir, 'rgb_video.mp4'), way='cv2')
+    video_frames = video_frames[:-(len(video_frames)-len(action_indices)+1)]  # drop the last frame corresponding to the "STOP"
     return video_frames, action_indices 
 
 class NewDataset(Dataset):
@@ -61,7 +62,7 @@ class NewDataset(Dataset):
 
     def load_dataset(self, data_dir):
         self.video_frames, self.action_indices = load_SA(data_dir)
-        # self.check_video_action(self.video_frames, self.action_indices, 0)
+        self.check_video_action(self.video_frames, self.action_indices, 0)
         if self.num_action > 3: self.action_indices = self.action_with_duration(self.action_indices)
         self.action_indices = torch.LongTensor(self.action_indices)
         # sample context
