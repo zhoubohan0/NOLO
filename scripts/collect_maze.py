@@ -384,7 +384,9 @@ class WirelessHighLevelController:
 
 def check_collection(directory, istart=0):
     video_frames = mp42np(os.path.join(directory, "rgb_video.mp4"), way='cv2')
-    actions = np.load(os.path.join(directory, "action.npy"))
+    with open(os.path.join(directory, 'data.json'), 'r') as f:
+        data = json.load(f)
+        actions = data['true_actions']
     print(f"frames: {video_frames.shape} | actions: {actions.shape}")
     action_space =  ["MoveAhead", "RotateLeft", "RotateRight", "Stop"]
     for i in range(istart, len(video_frames)):
