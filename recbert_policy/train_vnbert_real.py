@@ -192,10 +192,13 @@ class Trainer(nn.Module):
             self.policy.load_state_dict(state_dict,strict=True)
             print(f'{"[ Partially ]" if is_partial else ""} load pretrain ckpt from {pretrain_ckpt}') 
 
+    def roll(self, action, k):
+        return action // 3 * 3 + torch.maximum(action % 3 - k, torch.zeros_like(action))
+
     def cal_loss(self, goal, state, action):
         loss_dict = {}
         B, T, A = state.size(0), state.size(1), self.args.num_action
-        
+
         q_logits, a_logits = torch.empty((B,T,self.policy.hidden_size), device=self.device), torch.empty((B,T,A), device=self.device)
         st, enc_context, context_frame_embs = self.policy.enc_context(self.dataset.context_frames.to(self.device), self.dataset.context_actions.to(self.device))  # (1, 1, Dc), (1, Tc+1, Dc), (Tc, Dcf)
         enc_pure_context = enc_context[:,1:,:]  # (1, Tc, Dc)
@@ -207,7 +210,12 @@ class Trainer(nn.Module):
             q_logits[:,t:t+1], a_logits[:,t] = st, logit
         
         # loss action
+        '''
         loss_dict['loss_action'] = F.cross_entropy(a_logits.view(-1,A), action.view(-1))
+        '''
+        loss_dict['loss_action'] = 0.6 * F.cross_entropy(a_logits.view(-1,A), action.view(-1)) + \
+            0.3 * F.cross_entropy(a_logits.view(-1,A), self.roll(action,1).view(-1)) + \
+            0.1 * F.cross_entropy(a_logits.view(-1,A), self.roll(action,2).view(-1))
 
         # loss termination
         termination = torch.zeros((B, T, 1),dtype=torch.long).to(self.device).detach()
@@ -225,6 +233,7 @@ class Trainer(nn.Module):
             )
 
         # loss bcq
+        '''
         q_value = self.policy.critic_head(q_logits)  # (B, T, A)
         cur_Q = q_value.gather(-1, action.unsqueeze(-1))
         with torch.no_grad():
@@ -236,9 +245,9 @@ class Trainer(nn.Module):
             # TD_target = rewards + gamma * nextqtarget(nexts, nexta)
             logits_q_target_next = self.policy.target_critic_head(q_logits.roll(-1, 1))
             TD_target = termination + self.args.gamma * logits_q_target_next.gather(-1, next_actions) * (1 - termination)
-        loss_dict['loss_bcq'] = F.smooth_l1_loss(cur_Q, TD_target)    
+        loss_dict['loss_bcq'] = F.smooth_l1_loss(cur_Q, TD_target)   
         loss_dict['loss_action_logits_norm'] = 0.01 * a_logits.pow(2).mean()
-
+        '''
         return loss_dict
 
     def rollout(self):
@@ -381,12 +390,12 @@ if __name__ == '__main__':
     parser.add_argument('--action_thresh', type=float, default=0.5)
     parser.add_argument('--temporal_net', type=str, default='none')
     parser.add_argument('--gamma', type=float, default=0.99)
-    parser.add_argument('--lr', type=float, default=3e-4)
+    parser.add_argument('--lr', type=float, default=1e-4)
     parser.add_argument('--betas', type=float, default=(0.9, 0.95))
     parser.add_argument('--weight_decay', type=float, default=0.1)
     parser.add_argument('--epoch', type=int, default=2000000)
-    parser.add_argument('--batch_size', type=int, default=32)  # as large as possible
-    parser.add_argument('--horizon', type=int, default=10)      # as small as possible
+    parser.add_argument('--batch_size', type=int, default=6)  # as large as possible
+    parser.add_argument('--horizon', type=int, default=30)      # as small as possible
     parser.add_argument('--max_grad_norm', type=float, default=1.0)
     parser.add_argument('--log_interval', type=int, default=10)
     parser.add_argument('--switch_interval', type=int, default=10)

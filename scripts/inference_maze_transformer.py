@@ -60,7 +60,7 @@ def rearrange(items):
     return result
 
 class Policy(VNBERTPolicy):
-    def __init__(self, dataset, ckpt_file='', mode='Q',context_type='SA',**kwargs):
+    def __init__(self, dataset, ckpt_file='', mode='A',context_type='SA',**kwargs):
         super(Policy, self).__init__()
         self.mode = mode
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")

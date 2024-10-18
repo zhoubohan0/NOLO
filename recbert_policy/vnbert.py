@@ -438,12 +438,13 @@ class BertLayerNorm(nn.Module):
         return self.weight * x + self.bias
 
 class Place365ResEncoder(nn.Module):
-    def __init__(self, arch='resnet18', shape=(224,224), mu_sigma=[[0.485, 0.456, 0.406], [0.229, 0.224, 0.225]]):
+    def __init__(self, arch='resnet18', shape=(224,224), mu_sigma=[[0.485, 0.456, 0.406], [0.229, 0.224, 0.225]], pretrained=True):
         super(Place365ResEncoder, self).__init__()
         resnet = models.__dict__[arch](num_classes=365)#weights=False,
-        checkpoint = torch.load(f'recbert_policy/{arch}_places365.pth.tar', map_location=lambda storage, loc: storage)
-        state_dict = {str.replace(k,'module.',''): v for k,v in checkpoint['state_dict'].items()}
-        resnet.load_state_dict(state_dict)
+        if pretrained:
+            checkpoint = torch.load(f'recbert_policy/{arch}_places365.pth.tar', map_location=lambda storage, loc: storage)
+            state_dict = {str.replace(k,'module.',''): v for k,v in checkpoint['state_dict'].items()}
+            resnet.load_state_dict(state_dict)
         if arch == 'resnet50':
             self.linear = nn.Linear(2048, 512)
             nn.init.constant_(self.linear.weight, 0.005)
@@ -515,7 +516,7 @@ class VNBERTPolicy(nn.Module):
         
         # Encoder for state and goal
         self.num_action = num_action
-        self.state_encoder = Place365ResEncoder()
+        self.state_encoder = Place365ResEncoder(pretrained=False)
         self.goal_encoder = ClipEncoder()
 
         # action embedding 
@@ -558,7 +559,6 @@ class VNBERTPolicy(nn.Module):
         # termination head
         self.termination_head = nn.Linear(self.hidden_size, 2, bias=False)
 
-
     def enc_context(self, context_frames, context_actions=None):
         '''
         context_frames: (Tc, H, W, C)
@@ -597,7 +597,6 @@ class VNBERTPolicy(nn.Module):
         state_proj = self.state_LayerNorm(self.state_proj(state_output))              # (B, 768)
 
         return state_proj.unsqueeze(1), logit  # (B, 1, 768), (B, Tv)
-
 
     def forward(self, mode, context_embs, goal, state,):
         if mode == 'language':
