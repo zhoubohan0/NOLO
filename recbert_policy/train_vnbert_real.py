@@ -34,6 +34,8 @@ def load_SA(data_dir):
     action_indices = all_data['true_actions'][1:]  # TODO 
     video_frames = mp42np(osp.join(data_dir, 'rgb_video.mp4'), way='cv2')
     video_frames = video_frames[:-(len(video_frames)-len(action_indices))]  # drop the last frame corresponding to the "STOP"
+    # remove invalid actions
+    action_indices = [a if a < 3 else 0 for a in action_indices]
     return video_frames, action_indices 
 
 class NewDataset(Dataset):
@@ -45,7 +47,7 @@ class NewDataset(Dataset):
             ToPILImage(),
             RandomResizedCrop(224, scale=(0.8, 1.0), ratio=(0.8, 1.2)),
             RandomHorizontalFlip(p=0.1),
-            ColorJitter(brightness=0.4, contrast=0.4, saturation=0.4, hue=0.1),
+            ColorJitter(brightness=0.5, contrast=0.5, saturation=0.5, hue=0.1),
         ])
         self.switch_dataset()
 
@@ -55,7 +57,7 @@ class NewDataset(Dataset):
         for i in range(istart, len(video_frames)):
             frame, true_action = video_frames[i], actions[i]
             frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
-            cv2.putText(frame, f'true:{action_space[true_action]}', (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 200), 2, cv2.LINE_AA)
+            cv2.putText(frame, f'{action_space[true_action]}', (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 200), 2, cv2.LINE_AA)
             # cv2.putText(frame, f'pred:{action_space[pred_action]}', (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2, cv2.LINE_AA)
             cv2.imshow(f'timestep:{i}', frame)
             if cv2.waitKey(1500) & 0xFF == ord('q'):
@@ -64,13 +66,14 @@ class NewDataset(Dataset):
 
     def load_dataset(self, data_dir):
         self.video_frames, self.action_indices = load_SA(data_dir)
-        # self.check_video_action(self.video_frames, self.action_indices, 0)
         if self.num_action > 3: self.action_indices = self.action_with_duration(self.action_indices)
         self.action_indices = torch.LongTensor(self.action_indices)
         # sample context
         self.context_ids = torch.arange(len(self.video_frames))
         self.context_frames = torch.from_numpy(np.stack([np.array(self.augment(self.video_frames[i])) for i in self.context_ids]))
         self.context_actions = self.action_indices[self.context_ids]
+        # self.check_video_action(self.video_frames, self.action_indices, 0)
+        # self.check_video_action(self.context_frames.numpy(), load_SA(data_dir)[-1], 0)
 
     def switch_dataset(self,):
         cur_data_dir = random.choice(glob(osp.join(self.data_dir, '*')))
@@ -91,14 +94,40 @@ class NewDataset(Dataset):
         assert len(new_actions) == len(actions)
         return new_actions
 
+    def cal_termination(self, action, t):
+        if self.num_action > 3:
+            is_keep_xy = lambda x: x >= 3
+        else:
+            is_keep_xy = lambda x: x > 0
+        termination = torch.zeros(len(action),dtype=torch.long, requires_grad=False)
+        termination[t] = 1
+        for i in range(t, self.horizon-1):
+            if is_keep_xy(action[i]):
+                termination[i+1] = 1
+            else:
+                break
+
+        for i in range(t-1, 0, -1):
+            if is_keep_xy(action[i]):
+                termination[i] = 1
+            else:
+                break
+        
+        return termination
+
     def __getitem__(self, idx):
         if idx < self.horizon:
             idx = np.random.choice(range(self.horizon, len(self.action_indices)))
-        goal = torch.from_numpy(np.array(self.augment(self.video_frames[idx])))
         idxs = np.arange(idx-self.horizon, idx)
         state = torch.from_numpy(np.stack([np.array(self.augment(self.video_frames[i])) for i in idxs]))
         action = self.action_indices[idxs]
-        return goal, state, action
+        # sample a goal within horizon
+        gidx = np.random.choice(range(idx-self.horizon + 1, idx + 1))
+        goal = torch.from_numpy(np.array(self.augment(self.video_frames[gidx])))
+        # calculate termination
+        t = gidx - (idx - self.horizon) - 1  # g=s_{t+1},d_t=1
+        termination = self.cal_termination(action, t)
+        return goal, state, action, termination
 
     def __len__(self):
         return len(self.action_indices)
@@ -112,7 +141,7 @@ class Trainer(nn.Module):
 
         # dataloader
         self.dataset = NewDataset(args.data_dir, num_action=args.num_action, horizon=args.horizon)
-        self.dataloader = DataLoader(self.dataset, batch_size=args.batch_size, shuffle=True, num_workers=16, pin_memory=True)
+        self.dataloader = DataLoader(self.dataset, batch_size=args.batch_size, shuffle=True, num_workers=4, pin_memory=True)
 
         # model
         self.policy = VNBERTPolicy(args.num_action, args.action_emb_size, args.temporal_net).to(self.device)
@@ -121,7 +150,7 @@ class Trainer(nn.Module):
         self.optimizer = self.configure_optimizers()
 
         # logging
-        self.save_dir = f'{args.save_dir}/{args.exp_name}'
+        self.save_dir = f'{args.save_dir}/{args.exp_name}_{args.num_action}'
         self.writer = SummaryWriter(self.save_dir)
         train_config_dict = vars(args)
         save_json(train_config_dict, f'{self.save_dir}/config.json')
@@ -196,12 +225,15 @@ class Trainer(nn.Module):
     def roll(self, action, k):
         return action // 3 * 3 + torch.maximum(action % 3 - k, torch.zeros_like(action))
 
-    def cal_loss(self, goal, state, action):
+    def cal_loss(self, goal, state, action, termination, context_len=350):
         loss_dict = {}
         B, T, A = state.size(0), state.size(1), self.args.num_action
 
         q_logits, a_logits = torch.empty((B,T,self.policy.hidden_size), device=self.device), torch.empty((B,T,A), device=self.device)
-        st, enc_context, context_frame_embs = self.policy.enc_context(self.dataset.context_frames.to(self.device), self.dataset.context_actions.to(self.device))  # (1, 1, Dc), (1, Tc+1, Dc), (Tc, Dcf)
+        L = min(context_len, len(self.dataset.context_frames))
+        rid = torch.randint(L, len(self.dataset.context_frames), (1,)).item()
+        lid = rid - L
+        st, enc_context, context_frame_embs = self.policy.enc_context(self.dataset.context_frames[lid: rid].to(self.device), self.dataset.context_actions[lid: rid].to(self.device))  # (1, 1, Dc), (1, Tc+1, Dc), (Tc, Dcf)
         enc_pure_context = enc_context[:,1:,:]  # (1, Tc, Dc)
         goal_repr = self.policy.goal_encoder(goal) 
 
@@ -219,8 +251,8 @@ class Trainer(nn.Module):
             0.1 * F.cross_entropy(a_logits.view(-1,A), self.roll(action,2).view(-1))
 
         # loss termination
-        termination = torch.zeros((B, T, 1),dtype=torch.long).to(self.device).detach()
-        termination[:,-1] = 1
+        # termination = torch.zeros((B, T, 1),dtype=torch.long).to(self.device).detach()
+        # termination[:,-1] = 1
         terminal_logits = self.policy.termination_head(q_logits)
         loss_dict['loss_termination'] = F.cross_entropy(terminal_logits.view(-1,2), termination.view(-1))
 
@@ -255,19 +287,18 @@ class Trainer(nn.Module):
         seed_everything(42)
         num_batch_update = 0
         for epoch in range(1,1+self.args.epoch):
-            for goal, state, action in self.dataloader:
-                goal, state, action = goal.to(self.device), state.to(self.device), action.to(self.device) # (B, H, W, C), (B, T, H, W, C), (B,T)
-
+            for goal, state, action, termination in self.dataloader:
+                goal, state, action, termination = goal.to(self.device), state.to(self.device), action.to(self.device), termination.to(self.device) # (B, H, W, C), (B, T, H, W, C), (B,T), (B,T)
                 if self.scaler is not None:
                     with autocast(dtype=torch.float16):
-                        loss_dict = self.cal_loss(goal, state, action)
+                        loss_dict = self.cal_loss(goal, state, action, termination)
                     loss = sum([1.0 * v for k, v in loss_dict.items()])
                     self.optimizer.zero_grad()
                     self.scaler.scale(loss).backward()  
                     self.scaler.step(self.optimizer)
                     self.scaler.update()
                 else:
-                    loss_dict = self.cal_loss(goal, state, action)
+                    loss_dict = self.cal_loss(goal, state, action, termination)
                     loss = sum([1.0 * v for k, v in loss_dict.items()])
                     self.optimizer.zero_grad()
                     loss.backward()  

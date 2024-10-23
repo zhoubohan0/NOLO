@@ -516,7 +516,7 @@ class VNBERTPolicy(nn.Module):
         
         # Encoder for state and goal
         self.num_action = num_action
-        self.state_encoder = Place365ResEncoder(pretrained=False)
+        self.state_encoder = Place365ResEncoder(pretrained=True)
         self.goal_encoder = ClipEncoder()
 
         # action embedding 
