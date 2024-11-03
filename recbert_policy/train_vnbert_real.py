@@ -99,7 +99,7 @@ class NewDataset(Dataset):
             is_keep_xy = lambda x: x >= 3
         else:
             is_keep_xy = lambda x: x > 0
-        termination = torch.zeros(len(action),dtype=torch.long, requires_grad=False)
+        termination = torch.zeros(len(action),1,dtype=torch.long, requires_grad=False)
         termination[t] = 1
         for i in range(t, self.horizon-1):
             if is_keep_xy(action[i]):
@@ -225,7 +225,7 @@ class Trainer(nn.Module):
     def roll(self, action, k):
         return action // 3 * 3 + torch.maximum(action % 3 - k, torch.zeros_like(action))
 
-    def cal_loss(self, goal, state, action, termination, context_len=350):
+    def cal_loss(self, goal, state, action, termination, context_len=350, is_eval=False):
         loss_dict = {}
         B, T, A = state.size(0), state.size(1), self.args.num_action
 
@@ -266,7 +266,6 @@ class Trainer(nn.Module):
             )
 
         # loss bcq
-        '''
         q_value = self.policy.critic_head(q_logits)  # (B, T, A)
         cur_Q = q_value.gather(-1, action.unsqueeze(-1))
         with torch.no_grad():
@@ -278,9 +277,19 @@ class Trainer(nn.Module):
             # TD_target = rewards + gamma * nextqtarget(nexts, nexta)
             logits_q_target_next = self.policy.target_critic_head(q_logits.roll(-1, 1))
             TD_target = termination + self.args.gamma * logits_q_target_next.gather(-1, next_actions) * (1 - termination)
-        loss_dict['loss_bcq'] = F.smooth_l1_loss(cur_Q, TD_target)   
+        loss_dict['loss_bcq'] = 10 * F.huber_loss(cur_Q, TD_target, delta=0.01)   
+        '''
         loss_dict['loss_action_logits_norm'] = 0.01 * a_logits.pow(2).mean()
         '''
+        if is_eval: # inference
+            action_threshold = 0.5
+            action_dist = F.log_softmax(a_logits,-1).exp()
+            action_dist = (action_dist / action_dist.max(-1, keepdim=True)[0] > action_threshold).float()
+            pred_action_indice = (action_dist * q_value + (1. - action_dist) * -1e8).argmax(-1)
+            print(f'BC accuracy: {(a_logits.argmax(-1) == action).float().mean().item()}')
+            print(f'BCQ accuracy: {(pred_action_indice == action).float().mean().item()}')
+            print(f'cur_Q: {cur_Q[0].flatten()}\nTD_target: {TD_target[0].flatten()}')
+            breakpoint()
         return loss_dict
 
     def rollout(self):
@@ -298,7 +307,7 @@ class Trainer(nn.Module):
                     self.scaler.step(self.optimizer)
                     self.scaler.update()
                 else:
-                    loss_dict = self.cal_loss(goal, state, action, termination)
+                    loss_dict = self.cal_loss(goal, state, action, termination, is_eval=True)
                     loss = sum([1.0 * v for k, v in loss_dict.items()])
                     self.optimizer.zero_grad()
                     loss.backward()  
@@ -409,6 +418,7 @@ class Visualizer(nn.Module):
         plt.close()
         # plt.show()
   
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()

@@ -85,7 +85,8 @@ class Policy(VNBERTPolicy):
             if 'S' in self.context_type:
                 self.context_frames = torch.from_numpy(np.stack([np.array(self.augment(frame)) for frame in self.video_frames])).to(self.device)
                 self.context_actions = self.actions.to(self.device) if self.context_type == 'SA' else None
-                self.st, enc_context, _ = self.enc_context(self.context_frames, self.context_actions)  # (1, Dc), (1, Tc+1, Dc)
+                context_len = 350
+                self.st, enc_context, _ = self.enc_context(self.context_frames[:context_len], self.context_actions[:context_len])  # (1, Dc), (1, Tc+1, Dc)
                 self.enc_pure_context = enc_context[:,1:,:]  # (1, Tc, Dc)
             elif self.context_type == 'None':
                 self.st = torch.zeros(1, 1, self.hidden_size).to(self.device)
