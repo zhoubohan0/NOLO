@@ -1,9 +1,11 @@
-# VN-Bert 🤖
-🙌 Official implementation of NOLO: Navigate Only Look Once
+# NOLO: Navigate Only Look Once 
+[![Arxiv](https://img.shields.io/badge/Paper-red?style=for-the-badge&logo=google-docs&color=cc0000&logoColor=white)](https://arxiv.org/pdf/2408.01384)
+[![Website](https://img.shields.io/badge/Website-blue?style=for-the-badge&logo=react&color=007BFF&logoColor=white)](https://sites.google.com/view/nol0)
+[![BibTex](https://img.shields.io/badge/Bibtex-green?style=for-the-badge&logo=firebase&color=4F805D&logoColor=white)](https://scholar.googleusercontent.com/scholar.bib?q=info:VO1B5Z6HOVgJ:scholar.google.com)
 
-## 0. Overview
+## 0. Overview 🙌
 We aim to tackle the video navigation problem, whose goal is to train an in-context policy to find objects included in the context video in a new scene.
-After watching an 30-second egocentric video, an agent is expected to reason how to reach the target objetct specified by a goal image.
+After watching an 30-second egocentric video, an agent is expected to reason how to reach the target objetct specified by a goal image. **Please refer to our ![website](https://sites.google.com/view/nol0) for videos of real-world deployment**. 
 
 
 ## 1. Install 🚀
@@ -80,7 +82,7 @@ bash bash/eval_$domain$_baseline.sh  $baseline$
 ```bash
 bash bash/eval_habitat_policymode.sh  "nolo-bert" $checkpoint_path$ "Q" "SA"
 ```
-## 5. Real World Experiments! 
+## 5. Real World Experiments! 🤖
 - Collect random RGB and action sequence
 ```bash
 python scripts/collect_maze.py
