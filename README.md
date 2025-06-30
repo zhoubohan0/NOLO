@@ -6,7 +6,7 @@
 ## 0. Overview 🙌
 We aim to tackle the video navigation problem, whose goal is to train an in-context policy to find objects included in the context video in a new scene.
 After watching an 30-second egocentric video, an agent is expected to reason how to reach the target objetct specified by a goal image. **Please refer to our ![website](https://sites.google.com/view/nol0) for videos of real-world deployment**. 
-
+![](assets/head.png)
 
 ## 1. Install 🚀
 ### 1.1 Install required packages 🛰️
@@ -83,6 +83,7 @@ bash bash/eval_$domain$_baseline.sh  $baseline$
 bash bash/eval_habitat_policymode.sh  "nolo-bert" $checkpoint_path$ "Q" "SA"
 ```
 ## 5. Real World Experiments! 🤖
+![](assets/exp-config.png)
 - Collect random RGB and action sequence
 ```bash
 python scripts/collect_maze.py
